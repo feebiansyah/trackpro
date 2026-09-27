@@ -1,0 +1,187 @@
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID
+
+from pydantic import BaseModel
+
+
+# ---------------------------------------------------------------------------
+# Meta Account
+# ---------------------------------------------------------------------------
+
+class MetaAccountCreate(BaseModel):
+    ad_account_id: str
+    nama_tampilan: str
+    mata_uang: str = "IDR"
+
+
+class MetaAccountUpdate(BaseModel):
+    nama_tampilan: str | None = None
+    mata_uang: str | None = None
+    status_koneksi: str | None = None
+    markup_persen: Decimal | None = None
+
+
+class MetaTokenUpdate(BaseModel):
+    access_token: str  # long-lived token dari Meta (EAA...)
+
+
+class MetaAccountResponse(BaseModel):
+    id: UUID
+    ad_account_id: str
+    nama_tampilan: str
+    mata_uang: str
+    status_koneksi: str
+    markup_persen: Decimal = Decimal("0")
+    token_expires_at: datetime | None = None
+    has_token: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Shopee Account
+# ---------------------------------------------------------------------------
+
+class ShopeeAccountCreate(BaseModel):
+    nama_akun: str
+    catatan: str | None = None
+
+
+class ShopeeAccountUpdate(BaseModel):
+    nama_akun: str | None = None
+    catatan: str | None = None
+
+
+class ShopeeAccountResponse(BaseModel):
+    id: UUID
+    nama_akun: str
+    catatan: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Adu Account (Clickadu API)
+# ---------------------------------------------------------------------------
+
+class AduAccountCreate(BaseModel):
+    nama_tampilan: str
+
+
+class AduAccountUpdate(BaseModel):
+    nama_tampilan: str | None = None
+    status_koneksi: str | None = None
+
+
+class AduApiKeyUpdate(BaseModel):
+    api_key: str
+
+
+class AduAccountResponse(BaseModel):
+    id: UUID
+    nama_tampilan: str
+    status_koneksi: str
+    has_api_key: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Terra Account (Adsterra API)
+# ---------------------------------------------------------------------------
+
+class TerraAccountCreate(BaseModel):
+    nama_tampilan: str
+
+
+class TerraAccountUpdate(BaseModel):
+    nama_tampilan: str | None = None
+    status_koneksi: str | None = None
+
+
+class TerraApiKeyUpdate(BaseModel):
+    api_key: str
+
+
+class TerraAccountResponse(BaseModel):
+    id: UUID
+    nama_tampilan: str
+    status_koneksi: str
+    has_api_key: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Account Link (relasi meta <-> shopee / adu / terra)
+# ---------------------------------------------------------------------------
+
+class AccountLinkRequest(BaseModel):
+    shopee_account_id: UUID
+
+
+class AduAccountLinkRequest(BaseModel):
+    adu_account_id: UUID
+
+
+class TerraAccountLinkRequest(BaseModel):
+    terra_account_id: UUID
+
+
+# ---------------------------------------------------------------------------
+# Combined account list (dipakai frontend GET /accounts)
+# ---------------------------------------------------------------------------
+
+class AccountItem(BaseModel):
+    id: UUID
+    tipe: str          # "meta" | "shopee"
+    nama: str          # nama_tampilan (meta) atau nama_akun (shopee)
+    account_id: str | None   # ad_account_id (meta) atau None (shopee)
+    status_koneksi: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Accounts tree (hierarki Meta → Shopee, dipakai sidebar filter)
+# ---------------------------------------------------------------------------
+
+class AduLinked(BaseModel):
+    id: UUID
+    nama: str
+
+
+class TerraLinked(BaseModel):
+    id: UUID
+    nama: str
+
+
+class ShopeeLinked(BaseModel):
+    id: UUID
+    nama: str
+    # Adu/Terra terhubung ke Shopee ini (mis. "Adu Nipon" <-> "Shopee
+    # Nipon") — dikelola dari kartu Adu/Terra, cuma dipakai buat
+    # ringkasan read-only di kartu Shopee.
+    adu_accounts: list[AduLinked] = []
+    terra_accounts: list[TerraLinked] = []
+
+
+class MetaWithShopee(BaseModel):
+    id: UUID
+    nama: str
+    account_id: str
+    shopee_accounts: list[ShopeeLinked]
+
+
+class AccountsTree(BaseModel):
+    meta_accounts: list[MetaWithShopee]
+    shopee_unlinked: list[ShopeeLinked]
+    shopee_all: list[ShopeeLinked]  # seluruh akun Shopee milik user, dipakai frontend
+    # untuk nawarin opsi "hubungkan" per kartu Meta (satu akun Shopee boleh
+    # terhubung ke banyak akun Meta sekaligus, jadi TIDAK boleh difilter
+    # cuma yang belum ke-link ke akun manapun)
+    adu_all: list[AduLinked] = []
+    terra_all: list[TerraLinked] = []

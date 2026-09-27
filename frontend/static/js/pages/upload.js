@@ -1,0 +1,783 @@
+import { apiUpload, apiFetch } from '../api.js';
+
+export class UploadPage {
+  constructor(container) {
+    this.container = container;
+    this._accounts = [];
+  }
+
+  async render() {
+    this.container.innerHTML = `
+      <div class="page-header">
+        <div class="page-header-left">
+          <h1>Upload Data Harian</h1>
+          <p>Upload CSV Meta Ads, Shopee Commission, dan Shopee Click untuk memetakan campaign ke tag link Shopee.</p>
+        </div>
+        <div class="page-header-right">
+          <button class="btn btn-outline-red" id="btn-hapus-lama">Hapus Data Import Lama</button>
+        </div>
+      </div>
+      <div id="content"><div class="loading">Memuat…</div></div>
+    `;
+
+    try {
+      const data = await apiFetch('/accounts');
+      this._accounts = data || [];
+    } catch (_) {}
+
+    this._renderForm();
+
+    this.container.querySelector('#btn-hapus-lama')?.addEventListener('click', () => {
+      if (confirm('Hapus semua data import lama? Aksi ini tidak bisa dibatalkan.')) {
+        alert('Fitur hapus data belum tersedia.');
+      }
+    });
+  }
+
+  _renderForm() {
+    const el = this.container.querySelector('#content');
+    const shopeeOptions = this._accounts
+      .filter(a => a.tipe === 'shopee')
+      .map(a => `<option value="${a.id}">${a.nama}</option>`)
+      .join('');
+
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:16px;padding:0;">
+        <button id="btn-toggle-template" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:none;border:none;cursor:pointer;text-align:left;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;">Template CSV</div>
+            <div style="font-size:12px;color:var(--text-muted);">Download template, isi dengan data asli Anda, lalu upload di bawah.</div>
+          </div>
+          <svg id="toggle-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16" style="flex-shrink:0;color:var(--text-muted);transition:transform .2s;transform:rotate(0deg);"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="template-body" style="display:none;padding:0 20px 16px;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${[
+              ['template-meta-ads.csv',                    'Meta Ads'],
+              ['template-shopee-commission.csv',           'Shopee Komisi'],
+              ['template-shopee-click.csv',                'Shopee Klik'],
+              ['template-meta-breakdown-placement.csv',    'Breakdown Penempatan'],
+              ['template-meta-breakdown-platform.csv',     'Breakdown Platform'],
+              ['template-meta-breakdown-age-gender.csv',   'Breakdown Usia & Gender'],
+            ].map(([file, label]) => `
+              <a href="/static/templates/${file}" download="${file}" class="btn" style="font-size:12px;padding:6px 12px;display:flex;align-items:center;gap:6px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                ${label}
+              </a>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;padding:0;border-color:#fed7aa;display:none;">
+        <button id="btn-toggle-repair" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#fff7ed;border:none;cursor:pointer;text-align:left;border-radius:8px;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#9a3412;margin-bottom:2px;">⚠ Perbaikan Data — Reset Tag Salah</div>
+            <div style="font-size:12px;color:#9a3412;">Buat bersihin komisi yang salah nyangkut ke tag generik ("META"/"ADU"/"TERRA") akibat pergeseran kolom Tag_link di CSV Shopee.</div>
+          </div>
+          <svg id="repair-chevron" viewBox="0 0 24 24" fill="none" stroke="#9a3412" stroke-width="2.5" width="16" height="16" style="flex-shrink:0;transition:transform .2s;transform:rotate(-90deg);"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="repair-body" style="display:none;padding:16px 20px;">
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">
+            <strong>Urutan yang benar:</strong> (1) upload ulang CSV Komisi Shopee yang formatnya bergeser — sistem sekarang
+            otomatis deteksi kolom Tag_link yang benar. (2) baru setelah itu, pakai alat ini buat nolkan sisa komisi yang
+            kepalang nyangkut di tag generik untuk rentang tanggal yang sama, biar tidak dobel hitung.
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <div class="form-group">
+              <div class="form-label">AKUN SHOPEE</div>
+              <select class="form-select" id="repair-shopee">
+                <option value="">Pilih Akun Shopee</option>
+                ${shopeeOptions || '<option disabled>Belum ada akun Shopee terdaftar</option>'}
+              </select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">TAG GENERIK</div>
+              <select class="form-select" id="repair-tag">
+                <option value="META">META</option>
+                <option value="ADU">ADU</option>
+                <option value="TERRA">TERRA</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+            <div class="form-group" style="margin:0;">
+              <div class="form-label">DARI TANGGAL</div>
+              <input type="date" id="repair-dari" class="form-input">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <div class="form-label">SAMPAI TANGGAL</div>
+              <input type="date" id="repair-sampai" class="form-input">
+            </div>
+            <button class="btn btn-sm" id="btn-repair-cek">Cek Dulu</button>
+          </div>
+          <div id="repair-result" style="display:none;margin-top:14px;padding:12px 14px;border-radius:8px;background:var(--bg-muted);font-size:13px;"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="form-group">
+          <div class="form-label">AKUN SHOPEE</div>
+          <select class="form-select" id="sel-shopee">
+            <option value="">Pilih Akun Shopee</option>
+            ${shopeeOptions || '<option disabled>Belum ada akun Shopee terdaftar</option>'}
+          </select>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+          <div>
+            <div class="form-label" style="margin-bottom:8px;">Shopee Commission CSV</div>
+            <div class="upload-zone" id="zone-commission">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p><strong>Pilih file CSV</strong> atau drag & drop</p>
+              <p style="font-size:12px;margin-top:4px;">Laporan komisi affiliate dari Shopee</p>
+            </div>
+            <input type="file" id="file-commission" accept=".csv" multiple style="display:none">
+            <div id="name-commission" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+          </div>
+          <div>
+            <div class="form-label" style="margin-bottom:8px;">
+              Shopee Click CSV
+              <span class="badge badge-yellow" style="margin-left:6px;">Opsional</span>
+            </div>
+            <div class="upload-zone" id="zone-click">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p><strong>Pilih file CSV</strong> atau drag & drop</p>
+              <p style="font-size:12px;margin-top:4px;">Laporan klik affiliate dari Shopee</p>
+            </div>
+            <input type="file" id="file-click" accept=".csv" multiple style="display:none">
+            <div id="name-click" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+          </div>
+        </div>
+
+        <!-- Meta Ads — collapsible -->
+        <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px;">
+          <button id="btn-toggle-meta" type="button"
+            style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);padding:0;">
+            <svg id="ico-toggle-meta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="14" height="14" style="transition:transform .2s;transform:rotate(-90deg);">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+            META ADS (Opsional)
+          </button>
+          <div id="meta-section" style="display:none;margin-top:14px;">
+            <div style="margin-bottom:16px;">
+              <div class="form-label" style="margin-bottom:8px;">Meta Ads CSV</div>
+              <div class="upload-zone" id="zone-meta">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p><strong>Pilih file CSV</strong> atau drag & drop</p>
+                <p style="font-size:12px;margin-top:4px;">Data performa iklan dari Meta Ads Manager</p>
+              </div>
+              <input type="file" id="file-meta" accept=".csv" multiple style="display:none">
+              <div id="name-meta" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+            </div>
+
+            <div>
+              <div class="form-label" style="margin-bottom:4px;">
+                Meta Breakdown CSV
+                <span class="badge badge-yellow" style="margin-left:6px;">Opsional</span>
+              </div>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
+                Upload 1–3 file breakdown (Penempatan, Platform, atau Usia &amp; Gender). Tipe otomatis terdeteksi.
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:6px;">PENEMPATAN</div>
+                  <div class="upload-zone" id="zone-breakdown-placement" style="padding:16px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:24px;height:24px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p style="font-size:12px;margin-top:6px;"><strong>Pilih file</strong></p>
+                    <p style="font-size:11px;color:#9ca3af;">kolom: Placement</p>
+                  </div>
+                  <input type="file" id="file-breakdown-placement" accept=".csv" multiple style="display:none">
+                  <div id="name-breakdown-placement" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:6px;">PLATFORM</div>
+                  <div class="upload-zone" id="zone-breakdown-platform" style="padding:16px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:24px;height:24px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p style="font-size:12px;margin-top:6px;"><strong>Pilih file</strong></p>
+                    <p style="font-size:11px;color:#9ca3af;">kolom: Platform</p>
+                  </div>
+                  <input type="file" id="file-breakdown-platform" accept=".csv" multiple style="display:none">
+                  <div id="name-breakdown-platform" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:6px;">USIA & GENDER</div>
+                  <div class="upload-zone" id="zone-breakdown-age" style="padding:16px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:24px;height:24px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p style="font-size:12px;margin-top:6px;"><strong>Pilih file</strong></p>
+                    <p style="font-size:11px;color:#9ca3af;">kolom: Age + Gender</p>
+                  </div>
+                  <input type="file" id="file-breakdown-age" accept=".csv" multiple style="display:none">
+                  <div id="name-breakdown-age" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- input tersembunyi untuk slot & pembeda (tetap fungsional) -->
+        <select id="sel-slot" style="display:none">
+          <option value="1" selected>Slot 1 / Tag_link1</option>
+        </select>
+        <select id="sel-pembeda" style="display:none">
+          <option value="campaign" selected>Nama Campaign</option>
+        </select>
+
+        <div id="upload-progress" style="display:none;margin-top:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+            <span id="upload-progress-label">Memproses…</span>
+            <span id="upload-progress-pct"></span>
+          </div>
+          <div style="height:8px;border-radius:999px;background:var(--bg-muted);overflow:hidden;">
+            <div id="upload-progress-bar" style="height:100%;width:0%;background:#dc2626;border-radius:999px;transition:width .25s ease;"></div>
+          </div>
+        </div>
+
+        <div id="upload-error" class="alert alert-error" style="display:none;margin-top:12px;"></div>
+        <div id="upload-success" class="alert alert-success" style="display:none;margin-top:12px;"></div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="btn-upload" style="padding:9px 32px;">
+            Upload & Proses
+          </button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;padding:0;">
+        <button id="btn-toggle-adu" type="button"
+          style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:none;border:none;cursor:pointer;text-align:left;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px;">Adu Ads</div>
+            <div style="font-size:12px;color:var(--text-muted);">
+              Upload <strong>Zone CSV dari Adu Ads</strong>. Kolom <code>Cost</code> (USD)
+              otomatis dikonversi ke <strong>Budget Rupiah</strong> (× Rp 19.000).
+            </div>
+          </div>
+          <svg id="ico-toggle-adu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            width="14" height="14" style="flex-shrink:0;color:var(--text-muted);transition:transform .2s;transform:rotate(-90deg);">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div id="adu-section" style="display:none;padding:0 20px 20px;">
+          <div class="form-group" style="margin-bottom:12px;">
+            <div class="form-label">TANGGAL DATA</div>
+            <input type="date" id="inp-adu-tanggal" class="form-input" style="width:180px;"
+              value="${new Date().toISOString().split('T')[0]}">
+          </div>
+
+          <div class="upload-zone" id="zone-adu" style="max-width:480px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <p><strong>Pilih file CSV</strong> atau drag & drop</p>
+            <p style="font-size:12px;margin-top:4px;">Zone CSV dari Adu Ads (kolom: Zone ID, Cost, dll.)</p>
+          </div>
+          <input type="file" id="file-adu" accept=".csv" style="display:none">
+          <div id="name-adu" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+
+          <div id="adu-error"   class="alert alert-error"   style="display:none;margin-top:10px;"></div>
+          <div id="adu-success" class="alert alert-success" style="display:none;margin-top:10px;"></div>
+
+          <div style="margin-top:12px;display:flex;justify-content:flex-end;">
+            <button class="btn btn-primary" id="btn-upload-adu" style="padding:9px 32px;">Upload Adu</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;padding:0;">
+        <button id="btn-toggle-terra" type="button"
+          style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:none;border:none;cursor:pointer;text-align:left;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px;">Terra Ads</div>
+            <div style="font-size:12px;color:var(--text-muted);">
+              Upload <strong>Placement CSV dari Terra Ads</strong>. Kolom <code>Spent</code> (USD)
+              otomatis dikonversi ke <strong>Budget Rupiah</strong> (× Rp 19.000).
+            </div>
+          </div>
+          <svg id="ico-toggle-terra" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            width="14" height="14" style="flex-shrink:0;color:var(--text-muted);transition:transform .2s;transform:rotate(-90deg);">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div id="terra-section" style="display:none;padding:0 20px 20px;">
+          <div class="form-group" style="margin-bottom:12px;">
+            <div class="form-label">TANGGAL DATA</div>
+            <input type="date" id="inp-terra-tanggal" class="form-input" style="width:180px;"
+              value="${new Date().toISOString().split('T')[0]}">
+          </div>
+
+          <div class="upload-zone" id="zone-terra" style="max-width:480px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <p><strong>Pilih file CSV</strong> atau drag & drop</p>
+            <p style="font-size:12px;margin-top:4px;">Placement CSV dari Terra Ads (kolom: Placement, Spent, dll.)</p>
+          </div>
+          <input type="file" id="file-terra" accept=".csv" style="display:none">
+          <div id="name-terra" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+
+          <div id="terra-error"   class="alert alert-error"   style="display:none;margin-top:10px;"></div>
+          <div id="terra-success" class="alert alert-success" style="display:none;margin-top:10px;"></div>
+
+          <div style="margin-top:12px;display:flex;justify-content:flex-end;">
+            <button class="btn btn-primary" id="btn-upload-terra" style="padding:9px 32px;">Upload Terra</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;">Pembayaran WD Shopee</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+          Upload <strong>BillConversionReport</strong> dari Shopee Affiliate (format .csv atau .xlsx).
+          Data akan ditampilkan di Komisi Bersih dengan kalkulasi pajak progresif.
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <div class="form-label">AKUN SHOPEE</div>
+          <select class="form-select" id="sel-shopee-wd">
+            <option value="">Pilih Akun Shopee</option>
+            ${shopeeOptions || '<option disabled>Belum ada akun Shopee terdaftar</option>'}
+          </select>
+        </div>
+
+        <div class="upload-zone" id="zone-wd" style="max-width:480px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <p><strong>Pilih file CSV / XLSX</strong> atau drag & drop</p>
+          <p style="font-size:12px;margin-top:4px;">BillConversionReport dari Shopee Affiliate</p>
+        </div>
+        <input type="file" id="file-wd" accept=".csv,.xlsx" style="display:none">
+        <div id="name-wd" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+
+        <div id="wd-error"   class="alert alert-error"   style="display:none;margin-top:10px;"></div>
+        <div id="wd-success" class="alert alert-success" style="display:none;margin-top:10px;"></div>
+
+        <div style="margin-top:12px;display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="btn-upload-wd" style="padding:9px 32px;">Upload WD</button>
+        </div>
+      </div>
+    `;
+
+    this._bindUploadZone('zone-commission', 'file-commission', 'name-commission');
+    this._bindUploadZone('zone-click', 'file-click', 'name-click');
+    this._bindUploadZone('zone-meta', 'file-meta', 'name-meta');
+    this._bindUploadZone('zone-breakdown-placement', 'file-breakdown-placement', 'name-breakdown-placement');
+    this._bindUploadZone('zone-breakdown-platform', 'file-breakdown-platform', 'name-breakdown-platform');
+    this._bindUploadZone('zone-breakdown-age', 'file-breakdown-age', 'name-breakdown-age');
+    this._bindUploadZone('zone-adu', 'file-adu', 'name-adu');
+    this._bindUploadZone('zone-terra', 'file-terra', 'name-terra');
+    this._bindUploadZone('zone-wd', 'file-wd', 'name-wd');
+
+    el.querySelector('#btn-upload').addEventListener('click', () => this._submit());
+    el.querySelector('#btn-upload-adu').addEventListener('click', () => this._submitAdu());
+    el.querySelector('#btn-upload-terra').addEventListener('click', () => this._submitTerra());
+    el.querySelector('#btn-upload-wd').addEventListener('click', () => this._submitWd());
+
+    el.querySelector('#btn-toggle-template').addEventListener('click', () => {
+      const body = el.querySelector('#template-body');
+      const chevron = el.querySelector('#toggle-chevron');
+      const open = body.style.display === 'none' || body.style.display === '';
+      body.style.display = open ? 'flex' : 'none';
+      body.style.flexWrap = 'wrap';
+      body.style.gap = '8px';
+      chevron.style.transform = open ? 'rotate(180deg)' : 'rotate(0deg)';
+    });
+
+    el.querySelector('#btn-toggle-meta').addEventListener('click', () => {
+      const sec = el.querySelector('#meta-section');
+      const ico = el.querySelector('#ico-toggle-meta');
+      const open = sec.style.display === 'none';
+      sec.style.display = open ? 'block' : 'none';
+      ico.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+    });
+
+    el.querySelector('#btn-toggle-adu').addEventListener('click', () => {
+      const sec = el.querySelector('#adu-section');
+      const ico = el.querySelector('#ico-toggle-adu');
+      const open = sec.style.display === 'none';
+      sec.style.display = open ? 'block' : 'none';
+      ico.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+    });
+
+    el.querySelector('#btn-toggle-terra').addEventListener('click', () => {
+      const sec = el.querySelector('#terra-section');
+      const ico = el.querySelector('#ico-toggle-terra');
+      const open = sec.style.display === 'none';
+      sec.style.display = open ? 'block' : 'none';
+      ico.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+    });
+
+    el.querySelector('#btn-toggle-repair').addEventListener('click', () => {
+      const body = el.querySelector('#repair-body');
+      const chevron = el.querySelector('#repair-chevron');
+      const open = body.style.display === 'none';
+      body.style.display = open ? 'block' : 'none';
+      chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+    });
+    el.querySelector('#btn-repair-cek').addEventListener('click', () => this._repairCek());
+  }
+
+  async _repairCek() {
+    const el = this.container.querySelector('#content');
+    const resultEl = el.querySelector('#repair-result');
+    const shopeeId = el.querySelector('#repair-shopee').value;
+    const tag      = el.querySelector('#repair-tag').value;
+    const dari     = el.querySelector('#repair-dari').value;
+    const sampai   = el.querySelector('#repair-sampai').value;
+
+    resultEl.style.display = 'block';
+    if (!shopeeId || !dari || !sampai) {
+      resultEl.innerHTML = '<span style="color:#dc2626;">Pilih akun Shopee dan rentang tanggal dulu.</span>';
+      return;
+    }
+    resultEl.innerHTML = 'Memeriksa…';
+
+    try {
+      const found = await apiFetch(`/taglink/tags/find?shopee_account_id=${shopeeId}&tag=${encodeURIComponent(tag)}`);
+      const preview = await apiFetch(`/taglink/tags/${found.tag_link_id}/preview-reset?tanggal_dari=${dari}&tanggal_sampai=${sampai}`);
+
+      if (!preview.jumlah_baris) {
+        resultEl.innerHTML = `Tidak ada komisi tersisa di tag "${found.tag}" untuk rentang ini — tidak perlu direset.`;
+        return;
+      }
+
+      const rp = n => 'Rp ' + Math.round(Number(n || 0)).toLocaleString('id-ID');
+      resultEl.innerHTML = `
+        <div style="margin-bottom:10px;">
+          Ditemukan <strong>${preview.jumlah_baris} baris</strong> di tag "<strong>${found.tag}</strong>"
+          (${preview.dari} s/d ${preview.sampai}) dengan total komisi <strong>${rp(preview.total_komisi)}</strong>.
+        </div>
+        <button class="btn btn-sm" id="btn-repair-reset" style="color:#dc2626;border-color:#dc2626;">
+          Reset komisi tag ini jadi Rp 0 (${dari} s/d ${sampai})
+        </button>`;
+
+      el.querySelector('#btn-repair-reset').addEventListener('click', async () => {
+        const ok = confirm(
+          `Yakin nolkan komisi tag "${found.tag}" untuk ${dari} s/d ${sampai}?\n\n` +
+          `Total ${rp(preview.total_komisi)} akan jadi Rp 0. PASTIKAN data yang benar sudah ` +
+          `terupload dulu ke tag-tag campaign aslinya sebelum ini dijalankan.`
+        );
+        if (!ok) return;
+        try {
+          await apiFetch(`/taglink/tags/${found.tag_link_id}/reset-range?tanggal_dari=${dari}&tanggal_sampai=${sampai}`, { method: 'POST' });
+          resultEl.innerHTML = `<span style="color:#16a34a;">Berhasil — komisi tag "${found.tag}" untuk ${dari} s/d ${sampai} sudah dinolkan.</span>`;
+        } catch (e) {
+          resultEl.innerHTML = `<span style="color:#dc2626;">Gagal reset: ${e.message}</span>`;
+        }
+      });
+    } catch (e) {
+      resultEl.innerHTML = `<span style="color:#dc2626;">${e.message}</span>`;
+    }
+  }
+
+  _bindUploadZone(zoneId, fileId, nameId) {
+    const zone = this.container.querySelector(`#${zoneId}`);
+    const input = this.container.querySelector(`#${fileId}`);
+    const nameEl = this.container.querySelector(`#${nameId}`);
+
+    zone.addEventListener('click', () => input.click());
+
+    input.addEventListener('change', () => {
+      this._showSelectedFiles(input, zone, nameEl);
+    });
+
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      zone.classList.add('active');
+    });
+
+    zone.addEventListener('dragleave', () => zone.classList.remove('active'));
+
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('active');
+      if (e.dataTransfer.files.length) {
+        const dt = new DataTransfer();
+        for (const f of e.dataTransfer.files) dt.items.add(f);
+        input.files = dt.files;
+        this._showSelectedFiles(input, zone, nameEl);
+      }
+    });
+  }
+
+  _showSelectedFiles(input, zone, nameEl) {
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    nameEl.textContent = files.length === 1
+      ? `✓ ${files[0].name}`
+      : `✓ ${files.length} file dipilih: ${files.map(f => f.name).join(', ')}`;
+    zone.style.borderColor = '#dc2626';
+    zone.style.background = '#fef2f2';
+  }
+
+  async _submit() {
+    const errEl = this.container.querySelector('#upload-error');
+    const successEl = this.container.querySelector('#upload-success');
+    const btn = this.container.querySelector('#btn-upload');
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const shopeeId = this.container.querySelector('#sel-shopee').value;
+    const tagSlot  = this.container.querySelector('#sel-slot').value || '1';
+    const commFiles = Array.from(this.container.querySelector('#file-commission').files);
+    const clickFiles = Array.from(this.container.querySelector('#file-click').files);
+    const metaFiles  = Array.from(this.container.querySelector('#file-meta').files);
+    const bdPlacementFiles = Array.from(this.container.querySelector('#file-breakdown-placement').files);
+    const bdPlatformFiles  = Array.from(this.container.querySelector('#file-breakdown-platform').files);
+    const bdAgeFiles       = Array.from(this.container.querySelector('#file-breakdown-age').files);
+    const anyBreakdown = bdPlacementFiles.length || bdPlatformFiles.length || bdAgeFiles.length;
+
+    const needsShopee = commFiles.length || clickFiles.length;
+    if (needsShopee && !shopeeId) {
+      errEl.textContent = 'Pilih akun Shopee terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!commFiles.length && !clickFiles.length && !metaFiles.length && !anyBreakdown) {
+      errEl.textContent = 'Upload minimal satu file CSV.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Memproses…';
+
+    const progWrap  = this.container.querySelector('#upload-progress');
+    const progLabel = this.container.querySelector('#upload-progress-label');
+    const progPct   = this.container.querySelector('#upload-progress-pct');
+    const progBar   = this.container.querySelector('#upload-progress-bar');
+    progWrap.style.display = 'block';
+    progBar.style.width = '0%';
+    progPct.textContent = '';
+
+    const results = [];
+    const errors = [];
+
+    // Hitung total file yang bakal diupload (buat label "file X/N") — pakai
+    // kondisi yang sama kayak di bawah supaya angkanya akurat.
+    const metaAccountsPre = this._accounts.filter(a => a.tipe === 'meta');
+    const metaIdPre = metaAccountsPre[0]?.id;
+    let fileTotal = commFiles.length + clickFiles.length;
+    if (metaFiles.length && metaAccountsPre.length) fileTotal += metaFiles.length;
+    if (metaIdPre) fileTotal += bdPlacementFiles.length + bdPlatformFiles.length + bdAgeFiles.length;
+    let fileIndex = 0;
+
+    // Upload 1 file dengan progress bar realtime: generate import_id di
+    // client, kirim ke backend, lalu polling GET /upload/imports/{id} tiap
+    // 600ms selagi request upload masih berjalan di server (backend update
+    // baris_diproses/total_baris secara berkala selama parsing & insert).
+    const uploadOneWithProgress = async (file, path, label) => {
+      fileIndex++;
+      const importId = crypto.randomUUID();
+      const sep = path.includes('?') ? '&' : '?';
+
+      progLabel.textContent = `${label} — file ${fileIndex}/${fileTotal}: ${file.name}`;
+      progBar.style.width = '0%';
+      progPct.textContent = '';
+
+      let stopped = false;
+      const poll = async () => {
+        if (stopped) return;
+        try {
+          const st = await apiFetch(`/upload/imports/${importId}`);
+          if (st && st.total_baris) {
+            const done = (st.baris_diproses || 0) + (st.baris_gagal || 0);
+            const pct = Math.min(100, Math.round(done / st.total_baris * 100));
+            progBar.style.width = `${pct}%`;
+            progPct.textContent = `${done}/${st.total_baris}`;
+          }
+        } catch (_) { /* diam, coba lagi tick berikutnya */ }
+      };
+      const timer = setInterval(poll, 600);
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await apiUpload(`${path}${sep}import_id=${importId}`, fd);
+        progBar.style.width = '100%';
+        return res;
+      } finally {
+        stopped = true;
+        clearInterval(timer);
+      }
+    };
+
+    // Upload N file ke endpoint yang sama satu per satu (backend hanya terima 1 file/request),
+    // lalu jumlahkan baris_diproses dan kumpulkan error per file agar file lain tetap diproses.
+    const uploadMany = async (files, path, label) => {
+      let total = 0;
+      for (const f of files) {
+        try {
+          const res = await uploadOneWithProgress(f, path, label);
+          total += res?.baris_diproses ?? 0;
+        } catch (err) {
+          errors.push(`${label} (${f.name}): ${err.message}`);
+        }
+      }
+      const suffix = files.length > 1 ? ` (${files.length} file)` : '';
+      results.push(`${label}: ${total} baris berhasil${suffix}`);
+    };
+
+    try {
+      if (commFiles.length) {
+        await uploadMany(commFiles, `/upload/shopee-commission?shopee_account_id=${shopeeId}&tag_slot=${tagSlot}`, 'Komisi');
+      }
+
+      if (clickFiles.length) {
+        await uploadMany(clickFiles, `/upload/shopee-click?shopee_account_id=${shopeeId}&tag_slot=${tagSlot}`, 'Klik');
+      }
+
+      if (metaFiles.length) {
+        const metaAccounts = this._accounts.filter(a => a.tipe === 'meta');
+        if (metaAccounts.length === 0) {
+          errors.push('Tambah akun Meta Ads dulu di Pengaturan → Akun Meta.');
+        } else {
+          const metaId = metaAccounts[0].id;
+          await uploadMany(metaFiles, `/upload/meta-ads?meta_account_id=${metaId}`, 'Meta Ads');
+        }
+      }
+
+      const metaAccounts = this._accounts.filter(a => a.tipe === 'meta');
+      const metaId = metaAccounts[0]?.id;
+      for (const [files, label] of [
+        [bdPlacementFiles, 'Breakdown Penempatan'],
+        [bdPlatformFiles,  'Breakdown Platform'],
+        [bdAgeFiles,       'Breakdown Usia & Gender'],
+      ]) {
+        if (files.length && metaId) {
+          await uploadMany(files, `/upload/meta-breakdown?meta_account_id=${metaId}`, label);
+        }
+      }
+
+      if (results.length > 0) {
+        successEl.textContent = 'Upload berhasil! ' + results.join(' · ');
+        successEl.style.display = 'block';
+      }
+      if (errors.length > 0) {
+        errEl.textContent = errors.join(' · ');
+        errEl.style.display = 'block';
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Upload & Proses';
+      progWrap.style.display = 'none';
+    }
+  }
+
+  async _submitWd() {
+    const errEl = this.container.querySelector('#wd-error');
+    const successEl = this.container.querySelector('#wd-success');
+    const btn = this.container.querySelector('#btn-upload-wd');
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const shopeeId = this.container.querySelector('#sel-shopee-wd').value;
+    const file = this.container.querySelector('#file-wd').files[0];
+
+    if (!shopeeId) {
+      errEl.textContent = 'Pilih akun Shopee terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!file) {
+      errEl.textContent = 'Pilih file BillConversionReport terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Memproses…';
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiUpload(`/upload/wd-payment?shopee_account_id=${shopeeId}`, fd);
+      successEl.textContent = `Upload berhasil! ${res?.baris_diproses ?? 0} hari data WD tersimpan.`;
+      successEl.style.display = 'block';
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Upload WD';
+    }
+  }
+
+  async _submitAdu() {
+    const errEl     = this.container.querySelector('#adu-error');
+    const successEl = this.container.querySelector('#adu-success');
+    const btn       = this.container.querySelector('#btn-upload-adu');
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const tanggal = this.container.querySelector('#inp-adu-tanggal').value;
+    const file    = this.container.querySelector('#file-adu').files[0];
+
+    if (!tanggal) {
+      errEl.textContent = 'Pilih tanggal data terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!file) {
+      errEl.textContent = 'Pilih file Adu Ads CSV terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Memproses…';
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiUpload(`/upload/adu?tanggal=${tanggal}`, fd);
+      successEl.textContent = `Upload berhasil! ${res?.baris_diproses ?? 0} zone tersimpan dengan kalkulasi budget rupiah.`;
+      successEl.style.display = 'block';
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Upload Adu';
+    }
+  }
+
+  async _submitTerra() {
+    const errEl     = this.container.querySelector('#terra-error');
+    const successEl = this.container.querySelector('#terra-success');
+    const btn       = this.container.querySelector('#btn-upload-terra');
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const tanggal = this.container.querySelector('#inp-terra-tanggal').value;
+    const file    = this.container.querySelector('#file-terra').files[0];
+
+    if (!tanggal) {
+      errEl.textContent = 'Pilih tanggal data terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!file) {
+      errEl.textContent = 'Pilih file Terra Ads CSV terlebih dahulu.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Memproses…';
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiUpload(`/upload/terra?tanggal=${tanggal}`, fd);
+      successEl.textContent = `Upload berhasil! ${res?.baris_diproses ?? 0} placement tersimpan dengan kalkulasi budget rupiah.`;
+      successEl.style.display = 'block';
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Upload Terra';
+    }
+  }
+
+  destroy() {}
+}
